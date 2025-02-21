@@ -324,7 +324,7 @@ endmodule
 
 #### 2.1.5. Исходные описания основных модулей сумматора
 
-* Создайте описание сумматора, использующее моделируемые задержки распространения сигнала.
+* Создайте описание сумматора и генератора тестовой последовательности. 
 
 
 ```Verilog
@@ -338,17 +338,44 @@ module cla_checker #(
   input 	en,
   output reg error
 );
-  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire [w-1:0] counter0;
-  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire [w-1:0] counter1;
-  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire[w-1:0] sum;
+  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire [w-1:0] counter;
+  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) reg [w-1:0] a,b,sum;
   wire error_comb;
-
- //LFSR счетчик и его обратный код
-  lfsr lsfr_128(.clk(clk),.rstn(rstn),.en(en),.q(counter0));
-  assign counter1 = ~counter0;
-  assign #8 sum = counter0 + counter1;
-  assign error_comb = (sum != {w{1'b1}});
-  
+  reg f;
+  reg carry_in;
+   //LFSR счетчик и его обратный код
+   lfsr lsfr_128(.clk(clk),.rstn(rstn),.en(en),.q(counter));
+  // Входной перенос формируется T триггером
+  always @(posedge clk) 
+	 if (!rstn) 
+	   carry_in <= 1'b0;
+	 else 
+	   carry_in <= ~carry_in; 
+  // Если carry_in==1, то a и b подаются из lsfr счетчика
+  // иначе a=b=0
+  always @(posedge clk) begin
+		if (!rstn) begin
+		  a <= {w{1'b0}};
+		  b <= {w{1'b0}};
+		end
+		else if (!carry_in) begin
+		  a <= counter;
+		  b <= ~counter;
+		end else begin
+		  a <= {w{1'b0}};
+		  b <= {w{1'b0}};
+		end
+  end
+  // Выход сумматора записывается в регистр
+  always @(posedge clk) begin
+		if (!rstn) 
+		  {sum,f} <= {(w+1){1'b0}};
+		else 
+		  {sum,f} = {a,carry_in} + {b,carry_in};
+  end
+  // Сравнение результата суммирования с эталонным значением происходит в следующем такте
+  assign error_comb = (sum != {w{1'b0}});
+  // Если наблюдается сигнал ошибки, то установить состояние светодиода: ВКЛ
   always @(posedge clk) begin
 		if (!rstn) begin
 		  error <= 1'b0;
@@ -360,6 +387,20 @@ module cla_checker #(
 
 endmodule
 ```
+
+В модуле cla_checker используется следующая логика тестирования сумматора. Схема представляет собой конвейерную структуру, выполняющую проверку работоспособности сумматора за три такта: 
+1. **Такт 1: Формирование операндов *a* и *b*.** Используется чередование значений lsfr счетчика (*a <= counter; b <= ~counter;*) и нулевых значений (*a <= {w{1'b0}}; b <= {w{1'b0}}*) с целью переключения цепочки ключей CLA сумматора. При нулевых значениях входных разрядов (a<sub>i</sub>=0 и b<sub>i</sub>=0) адресный вход мультриплексора сквозного переноса D<sub>i</sub> = 0 и сквозной перенос между разрядами отсутствует. В следующем такте разряды операндов a и b принимают значение lfsr счетчика и его инверсию (*a <= counter;  b <= ~counter;*), что дает D<sub>i</sub> = 1 во всех разрядах, а в младший разряд подается входной перенос *carry_in=1* (смотри рисунок 7). Таким образом входная последовательность операндов приводит к переключению всех мультиплексоров сквозного переноса и к распространению сигнала carry_in по цепочке замкнутых ключей. Операнды сохраняются в регистрах *a* и *b*. 
+   
+<img src="assets/sim1.jpg" alt="Результаты моделирования сумматора"/>
+
+{:.image-caption}
+**Рисунок 7 — Результаты моделирования**
+
+2. **Такт 2: Сложение операндов *a* и *b*.** Операнды подаются на сумматор и формируется комбинационная сумма. В конце такта сумма сохраняется в регистре *sum*.
+3. **Такт 3: Сравнение результата с ожидаемым.** Сумма двух операндов, ялвяющихся обратными величинами дает результат, состоящий из всех единичных разрядов ({w{1'b1}}). При добавлении переноса в младший разряд формируется результат сложения, равный нулю ({w{1'b0}}). 
+
+
+
 * Создайте модуль верхнего уровня, в котором инстанцирован менеджер синхросигналов `MMCM_BASE` и схема сброса системы.
   
 ```Verilog
@@ -530,12 +571,12 @@ process run "Generate Programming File" -force rerun_all
 
 * Подбирая параметры `CLKFBOUT_MULT_F` и `CLKOUT1_DIVIDE`, добейтесь максимальной частоты `F_CLA_max`, при которой отсутстуют нарушения временных ограничений.
 
-* Загрузите проект на плату ML605 (рисунок 7). Проверьте работоспособность сумматора при заданных Вами параметрах.
+* Загрузите проект на плату ML605 (рисунок 8). Проверьте работоспособность сумматора при заданных Вами параметрах.
   
 <img src="assets/ml605.png" alt="Отладочная плата Xilinx ML605" style="width:800px;"/>
 
 {:.image-caption}
-**Рисунок 7 — Отладочная плата Xilinx ML605**
+**Рисунок 8 — Отладочная плата Xilinx ML605**
 
 >**В отчет:** Параметры и выводы о работоспособности сумматора занесите в отчет.
 
@@ -572,8 +613,8 @@ process run "Generate Programming File" -force rerun_all
   ila ila_inst (
 	   .CONTROL(control0),  // INOUT BUS [35:0]
 	   .CLK(clk), 			    // IN
-	   .TRIG0(counter0), 	  // IN BUS [127:0]
-	   .TRIG1(counter1), 	  // IN BUS [127:0]
+	   .TRIG0(a), 	        // IN BUS [127:0]
+	   .TRIG1(b), 	        // IN BUS [127:0]
 	   .TRIG2(sum), 		    // IN BUS [127:0]
 	   .TRIG3(error_comb),	// IN BUS [0:0]
 	   .TRIG4(error) 		    // IN BUS [0:0]
@@ -582,12 +623,12 @@ endmodule
 ```
 
 * Выполните генерацию файла прошивки ПЛИС и конфигурацию ПЛИС.
-* Запустите программу ChipScope (рисунок 8). Программа доступна в перечне приложений ОС Ubuntu Linux.
+* Запустите программу ChipScope (рисунок 9). Программа доступна в перечне приложений ОС Ubuntu Linux.
 
 <img src="assets/part2_img1.png" alt="Окно программы логического анализатора ChipScope" style="width:800px;"/>
 
 {:.image-caption}
-**Рисунок 8 — Окно программы логического анализатора ChipScope**
+**Рисунок 9 — Окно программы логического анализатора ChipScope**
 
 
 * Выполните обнаружение устройств и сканирование JTAG цепочки (пункт меню `JTAG Chain`)
@@ -624,6 +665,7 @@ module pipelined_adder #(
   input rstn,               // Сброс (активен низкий)
   input [w-1:0] op1,        // Операнд 1
   input [w-1:0] op2,        // Операнд 2
+  input cin,                // Входной перенос
   input valid_op1,          // Сигнал готовности операнда 1
   input valid_op2,          // Сигнал готовности операнда 2
   output reg [w-1:0] res,   // Результат сложения
@@ -686,8 +728,9 @@ module pipelined_adder #(
 
   // Загрузка операндов в первую ступень конвейера
   always @(*) begin
-    stage_op1[0] <= op1;
-    stage_op2[0] <= op2;
+    stage_op1[0] <= op1; //Операнд 1
+    stage_op2[0] <= op2; //Операнд 2
+    c_reg[0] <= cin; //Входной перенос
   end
 
   // Генерация ступеней конвейера
@@ -724,11 +767,11 @@ module pipelined_adder #(
     if (~rstn) begin // Сброс
       valid <= 1'b0;
       res <= {w{1'b0}};
-      valid_reg[i] <= {s{1'b0}};
-      c_reg <= {s{1'b0}};
+      valid_reg <= {s{1'b0}};
       for (i = 1; i < s; i = i + 1) begin
         stage_op1[i] <= {w{1'b0}};
         stage_op2[i] <= {w{1'b0}};
+        c_reg[i] <= 1'b0;
       end
     end else begin
       valid_reg[0] <= valid_op1 & valid_op2; // Сигнал готовности для первой ступени
@@ -761,31 +804,54 @@ module cla_checker_pipelined #(
   input 	en,
   output reg error
 );
-  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire [w-1:0] counter0;
-  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire [w-1:0] counter1;
-  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire[w-1:0] sum;
+
+  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) wire [w-1:0] counter,sum;
+  (* KEEP="TRUE" *)(* DONT_TOUCH="TRUE" *) reg [w-1:0] a,b;
   wire error_comb;
+  reg carry_in;
   wire sum_valid;
   //LFSR     
-  lfsr lfsr_inst(.clk(clk),.rstn(rstn),.en(en),.q(counter0));
-  assign counter1 = ~counter0;
-  assign error_comb = sum_valid & (sum != {w{1'b1}});
-
-  //   
+  lfsr lfsr_inst(.clk(clk),.rstn(rstn),.en(en),.q(counter));
+  // Входной перенос формируется T триггером
+  always @(posedge clk) 
+	 if (!rstn) 
+	   carry_in <= 1'b0;
+	 else 
+	   carry_in <= ~carry_in; 
+  // Если carry_in==1, то a и b подаются из lsfr счетчика
+  // иначе a=b=0
+  always @(posedge clk) begin
+		if (!rstn) begin
+		  a <= {w{1'b0}};
+		  b <= {w{1'b0}};
+		end
+		else if (!carry_in) begin
+		  a <= counter;
+		  b <= ~counter;
+		end else begin
+		  a <= {w{1'b0}};
+		  b <= {w{1'b0}};
+		end
+  end
+  // Cумматор
   pipelined_adder #(
 		.w(128),       //  
 		.s(4)          //   
   ) pipelined_adder_inst (
 		.clk(clk),
 		.rstn(rstn),
-		.op1(counter0),
-		.op2(counter1),
+		.op1(a),
+		.op2(b),
+    .cin(carry_in),
 		.valid_op1(~en),
 		.valid_op2(~en),
 		.res(sum),
 		.valid(sum_valid)
   );
 
+  // Сравнение результата суммирования с эталонным значением происходит в следующем такте
+  assign error_comb = sum_valid & (sum != {w{1'b0}});
+  // Если наблюдается сигнал ошибки, то установить состояние светодиода: ВКЛ
   always @(posedge clk) begin
 		if (!rstn) begin
 		  error <= 1'b0;
@@ -803,13 +869,12 @@ module cla_checker_pipelined #(
   ila ila_inst (
 	   .CONTROL(control0),  // INOUT BUS [35:0]
 	   .CLK(clk), 			    // IN
-	   .TRIG0(counter0), 	  // IN BUS [127:0]
-	   .TRIG1(counter1), 	  // IN BUS [127:0]
+	   .TRIG0(a), 	        // IN BUS [127:0]
+	   .TRIG1(b), 	        // IN BUS [127:0]
 	   .TRIG2(sum), 		    // IN BUS [127:0]
 	   .TRIG3(error_comb),	// IN BUS [0:0]
 	   .TRIG4(error) 		    // IN BUS [0:0]
   );
-	
 endmodule
 ```
 

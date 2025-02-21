@@ -6,6 +6,7 @@ module pipelined_adder #(
   input rstn,               // Сброс (активен низкий)
   input [w-1:0] op1,        // Операнд 1
   input [w-1:0] op2,        // Операнд 2
+  input cin,                // Входной перенос
   input valid_op1,          // Сигнал готовности операнда 1
   input valid_op2,          // Сигнал готовности операнда 2
   output reg [w-1:0] res,   // Результат сложения
@@ -68,8 +69,9 @@ module pipelined_adder #(
 
   // Загрузка операндов в первую ступень конвейера
   always @(*) begin
-    stage_op1[0] <= op1;
-    stage_op2[0] <= op2;
+    stage_op1[0] <= op1; //Операнд 1
+    stage_op2[0] <= op2; //Операнд 2
+    c_reg[0] <= cin; //Входной перенос
   end
 
   // Генерация ступеней конвейера
@@ -106,11 +108,11 @@ module pipelined_adder #(
     if (~rstn) begin // Сброс
       valid <= 1'b0;
       res <= {w{1'b0}};
-      valid_reg[i] <= {s{1'b0}};
-      c_reg <= {s{1'b0}};
+      valid_reg <= {s{1'b0}};
       for (i = 1; i < s; i = i + 1) begin
         stage_op1[i] <= {w{1'b0}};
         stage_op2[i] <= {w{1'b0}};
+        c_reg[i] <= 1'b0;
       end
     end else begin
       valid_reg[0] <= valid_op1 & valid_op2; // Сигнал готовности для первой ступени
