@@ -30,13 +30,9 @@ module pipelined_adder #(
     end
   endfunction
 
-  // Функция для получения ширины ступени
-  function integer width;
-    input integer stage;
-    begin
-      width = stage_widths[32*stage+:32];
-    end
-  endfunction
+  // Макрос для определения диапазона
+  `define idx(stage) base(stage)+:`wth(stage)
+
 
   // Регистры для хранения данных на каждой ступени конвейера
   reg [w-1:0] stage_reg [0:s-1];
@@ -78,24 +74,24 @@ module pipelined_adder #(
   generate
     for (k = 0; k < s; k = k + 1) begin : adder
       // Сложение на k-ой ступени
-      assign {c_comb[k+1], stage_comb[k][base(k)+:`wth(k)], f[k]} = {1'b0, stage_op1[k][base(k)+:`wth(k)], c_reg[k]} + {1'b0, stage_op2[k][base(k)+:`wth(k)], c_reg[k]};
+      assign {c_comb[k+1], stage_comb[k][`idx(k)], f[k]} = {1'b0, stage_op1[k][`idx(k)], c_reg[k]} + {1'b0, stage_op2[k][`idx(k)], c_reg[k]};
 
       // Тактируемый процесс для k-ой ступени
       always @(posedge clk) begin: stage_reg_inst
         if (~rstn) begin // Сброс
           for (i = 1; i < s; i = i + 1) begin
-            stage_reg[i][base(k)+:`wth(k)] <= {(`wth(k)){1'b0}};
+            stage_reg[i][`idx(k)] <= {(`wth(k)){1'b0}};
           end
         end else begin
           // Запись результата в регистр текущей ступени
-          stage_reg[0][base(k)+:`wth(k)] <= stage_comb[0][base(k)+:`wth(k)];
+          stage_reg[0][`idx(k)] <= stage_comb[0][`idx(k)];
           // Передача данных между ступенями
           for (i = 1; i < s; i = i + 1) begin
             if (valid_reg[i-1]) begin
               if (i == k)
-                stage_reg[i][base(k)+:`wth(k)] <= stage_comb[i][base(k)+:`wth(k)];
+                stage_reg[i][`idx(k)] <= stage_comb[i][`idx(k)];
               else
-                stage_reg[i][base(k)+:`wth(k)] <= stage_reg[i-1][base(k)+:`wth(k)];
+                stage_reg[i][`idx(k)] <= stage_reg[i-1][`idx(k)];
             end
           end
         end
