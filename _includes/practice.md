@@ -371,7 +371,7 @@ module cla_checker #(
 		if (!rstn) 
 		  {sum,f} <= {(w+1){1'b0}};
 		else 
-		  {sum,f} = {a,carry_in} + {b,carry_in};
+		  {sum,f} <= {a,carry_in} + {b,carry_in};
   end
   // Сравнение результата суммирования с эталонным значением происходит в следующем такте
   assign error_comb = (sum != {w{1'b0}});
